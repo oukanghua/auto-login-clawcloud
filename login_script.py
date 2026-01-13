@@ -25,7 +25,7 @@ def run_login():
         page = context.new_page()
 
         # 2. 访问 ClawCloud 登录页
-        target_url = "https://ap-northeast-1.run.claw.cloud/"
+        target_url = "https://us-west-1.run.claw.cloud/"
         print(f"🌐 [Step 2] 正在访问: {target_url}")
         page.goto(target_url)
         page.wait_for_load_state("networkidle")
