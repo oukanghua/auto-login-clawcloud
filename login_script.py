@@ -34,7 +34,7 @@ def run_login():
         print("🔍 [Step 3] 寻找 GitHub 按钮...")
         try:
             # 精确查找包含 'GitHub' 文本的按钮
-            login_button = page.locator("button:has-text('GitHub')")
+            login_button = page.get_by_role("button", name=re.compile(r"GitHub", re.IGNORECASE))
             login_button.wait_for(state="visible", timeout=10000)
             login_button.click()
             print("✅ 按钮已点击")
@@ -54,6 +54,7 @@ def run_login():
                 page.fill("#password", password)
                 page.click("input[name='commit']") # 点击登录按钮
                 print("📤 登录表单已提交")
+                page.screenshot(path="login_github.png")
         except Exception as e:
             print(f"ℹ️ 跳过账号密码填写 (可能已自动登录): {e}")
 
@@ -94,16 +95,7 @@ def run_login():
                 page.click("button:has-text('Authorize')", timeout=5000)
             except:
                 pass
-        # 无法跳入页面        
-        try:
-            # 精确查找包含 'GitHub' 文本的按钮
-            login_button = page.locator("button:has-text('GitHub')")
-            login_button.wait_for(state="visible", timeout=10000)
-            login_button.click()
-            print("✅ 按钮已点击")
-        except Exception as e:
-            print(f"⚠️ 未找到 GitHub 按钮 (可能已自动登录或页面变动): {e}")
-            
+           
         # 7. 等待最终跳转结果
         print("⏳ [Step 6] 等待跳转回 ClawCloud 控制台 (约20秒)...")
         # 强制等待较长时间，确保页面完全重定向
