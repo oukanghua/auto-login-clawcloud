@@ -13,7 +13,7 @@ def save_debug_artifacts(page, step_name):
     """保存截图、Cookie、页面HTML（脱敏敏感信息）"""
     try:
         # 截图
-        page.screenshot(path=f"{step_name}.png", full_page=True)
+        page.screenshot(path=f"login-result.png", full_page=True)
         
         # 保存脱敏Cookie
         cookies = page.context.cookies()
