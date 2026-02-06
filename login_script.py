@@ -4,6 +4,7 @@
 import os
 import time
 import pyotp  # 用于生成 2FA 验证码
+import re
 from playwright.sync_api import sync_playwright
 
 def run_login():
