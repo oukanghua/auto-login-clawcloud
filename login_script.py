@@ -1,5 +1,5 @@
 # 文件名: login_script.py
-# 作用: 自动登录 ClawCloud Run（终极修复版：智能状态检测 + 多策略定位 + 完整调试输出）
+# 作用: 自动登录 ClawCloud Run（终极修复版：精准处理 GitHub OAuth 流程）
 
 import os
 import time
@@ -7,15 +7,16 @@ import pyotp
 import json
 import re
 import base64
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from urllib.parse import urlparse, parse_qs
+from playwright.sync_api import sync_playwright, TimeoutError
 
 def save_debug_artifacts(page, step_name):
-    """保存截图、Cookie、页面HTML（脱敏敏感信息）"""
+    """保存截图、脱敏 Cookie 和页面 HTML（含关键状态参数）"""
     try:
         # 截图
-        page.screenshot(path=f"login-result.png", full_page=True)
+        page.screenshot(path=f"{step_name}.png", full_page=True)
         
-        # 保存脱敏Cookie
+        # 保存脱敏 Cookie
         cookies = page.context.cookies()
         safe_cookies = [
             {**c, 'value': '***REDACTED***'} if 'value' in c else c 
@@ -24,7 +25,7 @@ def save_debug_artifacts(page, step_name):
         with open(f"{step_name}_cookies.json", "w") as f:
             json.dump(safe_cookies, f, indent=2)
         
-        # 保存页面HTML（脱敏密码字段）
+        # 保存页面 HTML（脱敏密码字段）
         html = page.content()
         html = re.sub(r'(<input[^>]*type=["\']password["\'][^>]*value=["\'])[^"\']*(["\'])', r'\1***REDACTED***\2', html, flags=re.IGNORECASE)
         with open(f"{step_name}_page.html", "w", encoding="utf-8") as f:
@@ -53,7 +54,7 @@ def find_github_button(page, max_retries=3):
     """多策略查找 GitHub 登录按钮（带重试）"""
     strategies = [
         ("get_by_role(button, GitHub)", lambda: page.get_by_role("button", name=re.compile(r"GitHub", re.IGNORECASE))),
-        ("get_by_text(Sign in with GitHub)", lambda: page.get_by_text(re.compile(r"GitHub", re.IGNORECASE))),
+        ("get_by_text(Sign in with GitHub)", lambda: page.get_by_text(re.compile(r"Sign in with GitHub", re.IGNORECASE))),
         ("locator(button:has-text(GitHub))", lambda: page.locator('button:has-text("GitHub"), a:has-text("GitHub")')),
         ("locator([data-testid*='github'])", lambda: page.locator('[data-testid*="github" i], [href*="github" i]')),
         ("locator(.github-btn)", lambda: page.locator('.github-btn, .btn-github, [class*="github"]')),
@@ -61,7 +62,7 @@ def find_github_button(page, max_retries=3):
     
     for attempt in range(max_retries):
         print(f"🔍 尝试定位 GitHub 按钮 (第 {attempt+1}/{max_retries} 次)...")
-        page.wait_for_timeout(2000)  # 等待页面动态渲染
+        page.wait_for_timeout(2000)
         
         for name, locator_func in strategies:
             try:
@@ -88,7 +89,7 @@ def run_login():
         exit(1)
     print(f"✅ 环境变量校验通过 (用户名: {username[:3]}***)")
 
-    # =============== 启动浏览器（完整浏览器指纹） ===============
+    # =============== 启动浏览器 ===============
     print("🚀 [Step 1] 启动浏览器（模拟真实 Chrome 环境）...")
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -120,13 +121,12 @@ def run_login():
         )
         page = context.new_page()
         
-        # =============== 访问 ClawCloud + 立即检测登录状态 ===============
+        # =============== 访问 ClawCloud + 检测登录状态 ===============
         target_url = "https://us-west-1.run.claw.cloud/"
         print(f"🌐 [Step 2] 访问目标站点: {target_url}")
         page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
         page.wait_for_load_state("networkidle", timeout=30000)
         
-        # 🔑 核心修复：访问后立即检测是否已登录！
         logged_in, reason = is_logged_in(page)
         if logged_in:
             print(f"🎉 检测到已登录状态！原因: {reason}")
@@ -156,61 +156,118 @@ def run_login():
         page.wait_for_timeout(1000)
         save_debug_artifacts(page, "AFTER_GITHUB_CLICK")
 
-        # =============== 后续流程（GitHub登录/2FA/授权）保持原修复逻辑 ===============
-        # ... [此处复用之前修复的 Step 4-7 逻辑，为节省篇幅略写，实际部署需包含完整逻辑] ...
-        # 关键点：
-        # 1. 等待跳转到 GitHub
-        # 2. 填写账号密码
-        # 3. 处理 2FA（填验证码 + 回车）
-        # 4. 等待并点击 Authorize 按钮
-        # 5. 等待跳回 ClawCloud
-        # 6. 验证登录状态
-        
-        # =============== 简化后续流程示例（实际需完整实现） ===============
+        # =============== GitHub 登录流程 ===============
         try:
             # 等待跳转到 GitHub
-            page.wait_for_url(lambda u: "github.com" in u, timeout=25000)
+            page.wait_for_url(lambda url: "github.com" in url, timeout=25000)
             
-            # 填写账号密码（如在登录页）
+            # 填写 GitHub 账号密码
             if "login" in page.url:
+                print("🔒 填写 GitHub 账号密码...")
                 page.fill("#login_field", username)
                 page.fill("#password", password)
                 page.click("input[name='commit']")
+                print("📤 账号密码已提交")
                 page.wait_for_timeout(2000)
+                save_debug_artifacts(page, "GITHUB_LOGIN_SUBMITTED")
             
-            # 处理 2FA
+            # 处理 2FA 验证
             if "two-factor" in page.url or page.locator("#app_totp").count() > 0:
+                print("🔐 [Step 5] 检测到 2FA 验证页面！")
                 totp = pyotp.TOTP(totp_secret)
-                page.fill("#app_totp", totp.now())
-                page.keyboard.press("Enter")
-                page.wait_for_url("*authorize*", timeout=20000)
+                token = totp.now()
+                print(f"🔢 生成 TOTP 验证码: {token}")
                 
-                # 点击 Authorize
-                page.click("button:has-text('Authorize')", timeout=10000)
+                page.fill("#app_totp", token)
+                page.keyboard.press("Enter")  # 关键：必须回车提交
+                print("✅ 验证码已提交，等待授权页面...")
+                page.wait_for_timeout(2000)
+                save_debug_artifacts(page, "2FA_SUBMITTED")
             
-            # 等待返回 ClawCloud
-            page.wait_for_url(target_url, timeout=40000)
+            # =============== 核心修复：等待 GitHub 授权页面并处理 ===============
+            print("⏳ [Step 6] 等待 GitHub 授权页面...")
+            try:
+                # 等待授权页面（包含 authorize）
+                page.wait_for_url("*authorize*", timeout=20000)
+                print(f"✅ 授权页面已加载: {page.url}")
+                save_debug_artifacts(page, "GITHUB_AUTHORIZE_PAGE")
+                
+                # 提取 state 参数（用于验证）
+                parsed = urlparse(page.url)
+                query = parse_qs(parsed.query)
+                authorize_state = query.get('state', [None])[0]
+                print(f"   📌 授权页面 state: {authorize_state}")
+                
+                # 点击 Authorize 按钮
+                print("⚠️ 点击 'Authorize' 按钮...")
+                authorize_btn = page.get_by_role("button", name=re.compile(r"Authorize", re.IGNORECASE))
+                authorize_btn.wait_for(state="visible", timeout=10000)
+                authorize_btn.click()
+                print("✅ Authorize 按钮已点击")
+                page.wait_for_timeout(1000)
+                save_debug_artifacts(page, "AUTHORIZE_CLICKED")
+                
+            except TimeoutError:
+                print("⚠️ 未检测到授权页面（可能已自动授权）")
+                # 尝试直接等待回调页面
+                pass
+
+            # =============== 核心修复：等待回调页面 + 状态验证 ===============
+            print("⏳ [Step 7] 等待 ClawCloud 回调页面 (20秒)...")
+            try:
+                # 等待回调页面（包含 /callback）
+                page.wait_for_url("**/callback**", timeout=20000)
+                print(f"✅ 回调页面已加载: {page.url}")
+                save_debug_artifacts(page, "CALLBACK_PAGE")
+                
+                # 提取回调页面的 state
+                parsed = urlparse(page.url)
+                query = parse_qs(parsed.query)
+                callback_state = query.get('state', [None])[0]
+                print(f"   📌 回调页面 state: {callback_state}")
+                
+                # 验证 state 是否匹配
+                if authorize_state and authorize_state == callback_state:
+                    print("✅ STATE 验证通过！")
+                else:
+                    print("❌ STATE 验证失败！授权流程可能中断")
+                    page.screenshot(path="state_mismatch.png")
+            except TimeoutError:
+                print("⚠️ 未检测到回调页面（可能已自动跳转）")
+                # 尝试直接等待控制台
+                pass
+
+            # =============== 核心修复：等待跳转到控制台（30秒） ===============
+            print("⏳ [Step 8] 等待跳转回 ClawCloud 控制台 (30秒)...")
+            try:
+                page.wait_for_url(target_url, timeout=30000)
+                print(f"✅ 成功跳转至: {page.url}")
+            except TimeoutError:
+                print(f"⚠️ 未在 30 秒内跳转到 {target_url}")
+                print(f"   当前页面 URL: {page.url}")
+                page.screenshot(path="final_redirect_fail.png")
+                save_debug_artifacts(page, "FINAL_STATE")
             
-            # 最终验证
+            # =============== 验证登录状态 ===============
             logged_in, reason = is_logged_in(page)
-            save_debug_artifacts(page, "FINAL_STATE")
-            
             if logged_in:
                 print(f"\n{'='*50}\n🎉🎉🎉 LOGIN SUCCESS! ({reason})\n{'='*50}")
-                # 保存成功状态
                 with open("login_success.txt", "w") as f:
                     f.write(f"Success at {time.ctime()}\nURL: {page.url}\nReason: {reason}")
+                browser.close()
+                return
             else:
                 print(f"\n{'='*50}\n😭 LOGIN FAILED\n{'='*50}")
-                print("🔍 请检查 FINAL_STATE_* 文件分析原因")
+                print("🔍 请检查以下文件分析原因:")
+                print("   - CALLBACK_PAGE_page.html (回调页面结构)")
+                print("   - FINAL_STATE_page.html (最终页面结构)")
+                print("   - state_mismatch.png (状态不匹配截图)")
                 exit(1)
                 
         except Exception as e:
             print(f"❌ 流程执行异常: {str(e)[:200]}")
             save_debug_artifacts(page, "ERROR_STATE")
             raise
-        
-        browser.close()
 
 if __name__ == "__main__":
     try:
