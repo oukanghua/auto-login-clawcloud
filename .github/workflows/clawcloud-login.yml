@@ -37,5 +37,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: login-result
-          path: login_result.png
+          name: clawcloud-debug-${{ github.run_number }}
+          path: |
+            *.png
+            *_cookies.json
+            *_page.html
+            login_success.txt
+            state_mismatch.png
