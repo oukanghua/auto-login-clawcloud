@@ -96,7 +96,9 @@ def run_login():
                 page.click("button:has-text('Authorize')", timeout=5000)
             except:
                 pass
-           
+        # 跳转控制台        
+        page.goto(target_url)
+        page.wait_for_load_state("networkidle")    
         # 7. 等待最终跳转结果
         print("⏳ [Step 6] 等待跳转回 ClawCloud 控制台 (约20秒)...")
         # 强制等待较长时间，确保页面完全重定向
