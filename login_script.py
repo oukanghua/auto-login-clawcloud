@@ -17,7 +17,6 @@ def run_login():
 
     print("🚀 [Step 1] 访问 ClawCloud...")
     with sync_playwright() as p:
-        # 关闭无头模式，并额外传入禁用自动化特征的参数
         browser = p.chromium.launch(
             headless=False, 
             args=["--disable-blink-features=AutomationControlled"]
@@ -25,7 +24,6 @@ def run_login():
         context = browser.new_context(viewport={'width': 1920, 'height': 1080})
         page = context.new_page()
 
-        # 【核心修复】：使用 2.x 版本的最新语法，为页面披上隐身斗篷
         Stealth().apply_stealth_sync(page)
 
         # 1. 访问主页
